@@ -24,12 +24,12 @@ target_include_directories(vel_cmd_generator PUBLIC
 target_compile_features(vel_cmd_generator PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 ament_target_dependencies(
   vel_cmd_generator
-  "rclcpp"
+  rclcpp
   # "manipulator_interface"
   # "moveit_ros_planning_interface"
-  "sensor_msgs"
-  "std_msgs"
-  "eigen3_cmake_module"
+  sensor_msgs
+  std_msgs
+  eigen3_cmake_module
 )
 
 install(TARGETS vel_cmd_generator

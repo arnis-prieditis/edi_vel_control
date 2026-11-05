@@ -2,6 +2,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <Eigen/Geometry>
 #include <math.h>
 #include <iostream>
@@ -12,17 +13,27 @@ using std::placeholders::_1;
 
 #define PI 3.141592653589793
 
+enum ControlState {
+  IDLE,
+  MOVING,
+  STOPPING
+};
+
 
 class VelCmdGenNode : public rclcpp::Node {
   public:
     VelCmdGenNode() : Node("vel_cmd_gen_node") {
+      control_state = IDLE;
       joint_states_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
         "/joint_states", 10, std::bind(&VelCmdGenNode::joint_states_callback, this, _1));
       velocity_cmd_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
         "/forward_velocity_controller/commands", rclcpp::SystemDefaultsQoS());
+      start_stop_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+        "/start_stop", 10, std::bind(&VelCmdGenNode::start_stop_callback, this, _1));
       DH_a = {0.0, -0.425, -0.3922, 0.0, 0.0, 0.0};
       DH_d = {0.1625, 0.0, 0.0, 0.1333, 0.0997, 0.0996};
       DH_alpha = {PI/2, 0.0, 0.0, PI/2, -PI/2, 0.0};
+      timer_ = this->create_wall_timer(20ms, std::bind(&VelCmdGenNode::timer_callback, this));
     }
 
   private:
@@ -32,6 +43,9 @@ class VelCmdGenNode : public rclcpp::Node {
     std::array<double, 6> DH_a;
     std::array<double, 6> DH_d;
     std::array<double, 6> DH_alpha;
+    ControlState control_state;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr start_stop_sub_;
+    rclcpp::TimerBase::SharedPtr timer_;
     
     void joint_states_callback(const sensor_msgs::msg::JointState::SharedPtr msg) {
       // RCLCPP_INFO(this->get_logger(), "Received joint states: %s %f", msg->name[0].c_str(), msg->position[0]);
@@ -41,15 +55,42 @@ class VelCmdGenNode : public rclcpp::Node {
       joint_angles[3] = msg->position[3];
       joint_angles[4] = msg->position[4];
       joint_angles[5] = msg->position[5];
+    }
 
-      std::array<double, 6> vel_cmds = compute_vel_cmds(joint_angles, {0.01, 0.0, 0.0, 0.0, 0.0, 0.0}); // m/s and rad/s
-
-      auto cmd_msg = std::make_unique<std_msgs::msg::Float64MultiArray>();
-      cmd_msg->data.resize(vel_cmds.size());
-      for (size_t i = 0; i < vel_cmds.size(); i++){
-        cmd_msg->data[i] = vel_cmds[i];
+    void start_stop_callback(const std_msgs::msg::Bool::SharedPtr msg) {
+      if (msg->data) {
+        control_state = MOVING;
+        RCLCPP_INFO(this->get_logger(), "Received start command, moving.");
+      } else {
+        control_state = STOPPING;
+        RCLCPP_INFO(this->get_logger(), "Received stop command, stopping.");
       }
-      velocity_cmd_pub_->publish(std::move(cmd_msg));
+    }
+
+    void timer_callback() {
+      auto cmd_msg = std::make_unique<std_msgs::msg::Float64MultiArray>();
+      switch (control_state) {
+        case MOVING:
+          {
+          std::array<double, 6> vel_cmds = compute_vel_cmds(joint_angles, {0.01, 0.0, 0.0, 0.0, 0.0, 0.0}); // m/s and rad/s
+          cmd_msg->data.resize(vel_cmds.size());
+          for (size_t i = 0; i < vel_cmds.size(); i++){
+            cmd_msg->data[i] = vel_cmds[i];
+          }
+          velocity_cmd_pub_->publish(std::move(cmd_msg));
+          }
+          break;
+        case STOPPING:
+          cmd_msg->data.resize(6);
+          for (size_t i = 0; i < 6; i++){
+            cmd_msg->data[i] = 0.0;
+          }
+          velocity_cmd_pub_->publish(std::move(cmd_msg));
+          control_state = IDLE;
+          break;
+        case IDLE:
+          break;
+      }
     }
 
     // computes the homogenious transformation matrix
