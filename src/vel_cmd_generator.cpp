@@ -7,6 +7,7 @@
 #include <math.h>
 #include <iostream>
 #include <string>
+#include <map>
 
 using namespace std::literals::chrono_literals;
 using std::placeholders::_1;
@@ -48,13 +49,17 @@ class VelCmdGenNode : public rclcpp::Node {
     rclcpp::TimerBase::SharedPtr timer_;
     
     void joint_states_callback(const sensor_msgs::msg::JointState::SharedPtr msg) {
-      // RCLCPP_INFO(this->get_logger(), "Received joint states: %s %f", msg->name[0].c_str(), msg->position[0]);
-      joint_angles[0] = msg->position[0];
-      joint_angles[1] = msg->position[1];
-      joint_angles[2] = msg->position[2];
-      joint_angles[3] = msg->position[3];
-      joint_angles[4] = msg->position[4];
-      joint_angles[5] = msg->position[5];
+      std::map<std::string, double> joint_state_map;
+      for (int i=0; i<6; i++) {
+        joint_state_map[msg->name[i]] = msg->position[i];
+      }
+
+      joint_angles[0] = joint_state_map["shoulder_pan_joint"];
+      joint_angles[1] = joint_state_map["shoulder_lift_joint"];
+      joint_angles[2] = joint_state_map["elbow_joint"];
+      joint_angles[3] = joint_state_map["wrist_1_joint"];
+      joint_angles[4] = joint_state_map["wrist_2_joint"];
+      joint_angles[5] = joint_state_map["wrist_3_joint"];
     }
 
     void start_stop_callback(const std_msgs::msg::Bool::SharedPtr msg) {
@@ -112,14 +117,14 @@ class VelCmdGenNode : public rclcpp::Node {
       std::array<Eigen::MatrixXd, 6> HTMs;
       for (int i=0; i<6; i++) {
         HTMs[i] = HTM(joint_positions[i], DH_alpha[i], DH_a[i], DH_d[i]);
-        std::cout << "HTM " << i << i+1 << ":\n" << HTMs[i] << "\n";
+        // std::cout << "HTM " << i << i+1 << ":\n" << HTMs[i] << "\n";
       }
 
       Eigen::MatrixXd H06 = HTMs[0] * HTMs[1] * HTMs[2] * HTMs[3] * HTMs[4] * HTMs[5];
-      std::cout << "H06:\n" << H06 << "\n";
+      // std::cout << "H06:\n" << H06 << "\n";
 
       Eigen::Vector3d d06 = H06.block<3,1>(0,3);
-      std::cout << "d06:\n" << d06 << "\n";
+      // std::cout << "d06:\n" << d06 << "\n";
 
       Eigen::MatrixXd J(6, 6);
       
@@ -146,10 +151,10 @@ class VelCmdGenNode : public rclcpp::Node {
       J.block<3, 1>(0, 5) = H05.block<3, 1>(0, 2).cross(d06 - H05.block<3, 1>(0, 3));
       J.block<3, 1>(3, 5) = H05.block<3, 1>(0, 2);
 
-      std::cout << "Jacobian:\n" << J << "\n";
+      // std::cout << "Jacobian:\n" << J << "\n";
 
       Eigen::MatrixXd J_inv = J.inverse();
-      std::cout << "Jacobian inverse:\n" << J_inv << "\n";
+      // std::cout << "Jacobian inverse:\n" << J_inv << "\n";
 
       Eigen::VectorXd desired_ee_vel_vec(6);
       desired_ee_vel_vec <<
